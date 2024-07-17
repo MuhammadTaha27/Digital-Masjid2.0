@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sound Streaming Player</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/darkmode-js@1.5.7/lib/darkmode-js.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js" charset="utf-8"></script>
+    <script src="https://unpkg.com/pcm-player"></script>
+    <script src="js/worker.js"></script>
+</head>
+<style>
+body {
+    font-family: 'Roboto', sans-serif;
+    background-color: #f5f5f5;
+    margin: 0;
+    padding: 0;
+}
+
+header {
+    background-color: #333;
+    color: #fff;
+    padding: 20px;
+    text-align: center;
+}
+
+main {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: calc(100vh - 100px);
+}
+
+#visualization {
+    width: 60%;
+    margin-right: 20px;
+}
+
+#graph {
+    background-color: #000;
+    height: 300px;
+}
+
+#controls {
+    width: 30%;
+}
+
+.button {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 10px;
+    font-size: 16px;
+    text-align: center;
+    background-color: #007bff;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+}
+
+.button:hover {
+    background-color: #0056b3;
+}
+
+input[type="range"] {
+    width: 100%;
+    margin-bottom: 10px;
+}
+
+#playbackControls {
+    display: flex;
+    justify-content: space-between;
+}
+</style>
+<body>
+    <header>
+        <h1>Digital Masjid</h1>
+    </header>
+    <main>
+        <div id="visualization">
+            <div id="graph"></div>
+        </div>
+        <div id="controls">
+            <select id="topicSelect" class="button" onchange="connect()">
+                <option value="">Select a topic</option>
+            </select>
+            <input type="range" max="1" value="0.5" min="0" id="range" onchange="changeVolume(event)" step="0.1">
+            <div id="playbackControls">
+                <button id="pauseBtn" class="button" onclick="pause()">Pause</button>
+                <button id="continueBtn" class="button" onclick="continuePlay()">Continue</button>
+            </div>
+        </div>
+    </main>
+    <script>
+    let player;
+    let ws;
+    let port;
+    const DEFAULT_WS_PORT =  8888;
+
+    function addDarkmodeWidget() {
+        new Darkmode().showWidget();
+    }
+    window.addEventListener('load', () => {
+        fetchTopics(); // Fetch available topics on load
+        addDarkmodeWidget(); // Add your dark mode widget after connecting
+    });
+
+    var pauseBtn = document.getElementById("pauseBtn");
+    var continueBtn = document.getElementById("continueBtn");
+    pauseBtn.disabled = true;
+    continueBtn.disabled = true;
+
+    var worker = new Worker('js/worker.js');
+    worker.addEventListener('message', function (e) {
+        graphDataArray = graphDataArray.concat(e.data);
+        graphDataArray.splice(0, 1);
+
+        var data_update = {
+            y: [graphDataArray]
+        };
+
+        Plotly.update('graph', data_update);
+    }, false);
+
+    const arrayLength = 100;
+    var graphDataArray = [];
+
+    for (var i = 0; i < arrayLength; i++) {
+        graphDataArray[i] = 0;
+    }
+
+    var layout = {
+        title: 'Streaming Data',
+        paper_bgcolor: "#000",
+        plot_bgcolor: "#000",
+        xaxis: {
+            domain: [0, 1],
+            showticklabels: false,
+            color: "#FFF",
+        },
+        yaxis: {
+            domain: [0, 1],
+            color: "#FFF",
+            rangemode: "auto",
+        },
+    };
+
+    Plotly.newPlot('graph', [{
+        y: graphDataArray,
+        mode: 'lines',
+        line: { color: '#DF56F1' }
+    }], layout);
+
+    async function fetchTopics() {
+        const response = await fetch('/get-topics');
+        const topics = await response.json();
+        const topicSelect = document.getElementById("topicSelect");
+
+        topics.forEach(topic => {
+            const option = document.createElement("option");
+            option.value = topic;
+            option.textContent = topic;
+            topicSelect.appendChild(option);
+        });
+    }
+    function initializeTopicWebSocket() {
+        console.log(port);
+        ws = new WebSocket(`ws://localhost:${port}`);
+        ws.binaryType = 'arraybuffer';
+        ws.onopen = () => {
+            console.log(`Connected to topic WebSocket server on port ${port}`);
+        };
+        ws.onmessage = (event) => {
+            player.feed(event.data);
+        };
+    }
+    window.connect = function connect() {
+        const topicSelect = document.getElementById("topicSelect");
+        const topic = topicSelect.value;
+
+        if (!topic) return;
+
+        pauseBtn.disabled = false;
+
+        player = new PCMPlayer({
+            inputCodec: 'Int16',
+            channels: 1,
+            sampleRate: 44100,
+        });
+
+        // Close the existing WebSocket connection if there is one
+        if (ws) {
+            ws.close();
+        }
+
+        // Connect to the default WebSocket server to get the port for the topic
+        const defaultWS = new WebSocket(`ws://localhost:${DEFAULT_WS_PORT}`);
+        defaultWS.onopen = () => {
+            defaultWS.send(JSON.stringify({ topic }));
+        };
+        defaultWS.onmessage = (event) => {
+            const port  = event.data;
+            console.log(port);
+            if (port) {
+                defaultWS.close();
+                console.log(port);
+                ws = new WebSocket(`ws://localhost:${port}`);
+                ws.binaryType = 'arraybuffer';
+                ws.onopen = () => {
+                    console.log(`Connected to topic WebSocket server on port ${port}`);
+                };
+                ws.onmessage = (event) => {
+                    console.log(event.data);
+                    const arrayBuffer = event.data;
+                    const audioData = new Int16Array(arrayBuffer);
+                    console.log(audioData)
+                    player.feed(audioData);
+                };
+            }
+        };
+        defaultWS.onerror = (error) => {
+            console.error("Error with default WebSocket:", error);
+        };
+
+        defaultWS.onclose = () => {
+            console.log("Disconnected from default WebSocket server");
+        };
+    };
+
+    window.changeVolume = function changeVolume(e) {
+        player.volume(document.querySelector('#range').value);
+    };
+
+    window.pause = async function pause() {
+        pauseBtn.disabled = true;
+        continueBtn.disabled = false;
+        await player.pause();
+    };
+
+    window.continuePlay = function continuePlay() {
+        player.continue();
+        pauseBtn.disabled = false;
+        continueBtn.disabled = true;
+    };
+    </script>
+</body>
+</html>
