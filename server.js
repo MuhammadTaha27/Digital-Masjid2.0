@@ -3,10 +3,22 @@ const path = require("path");
 const express = require("express");
 const WebSocket = require("ws");
 const http = require("http");
+const os = require("os");
 
 const app = express();
 const PORT = process.env.PORT || 8000;
 
+function getServerIp() {
+  const interfaces = os.networkInterfaces();
+  for (let iface in interfaces) {
+    for (let alias of interfaces[iface]) {
+      if (alias.family === 'IPv4' && !alias.internal) {
+        return alias.address;
+      }
+    }
+  }
+  return '127.0.0.1'; // Fallback to localhost if no external IP is found
+}
 // HTTP server
 const server = http.createServer(app);
 
@@ -43,5 +55,6 @@ app.get("/audio", (req, res) =>
 );
 
 server.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT}`);
+  const ip = getServerIp();
+  console.log(`Server listening at http://${ip}:${PORT}`);
 });
