@@ -9,7 +9,6 @@
     <script src="https://cdn.jsdelivr.net/npm/darkmode-js@1.5.7/lib/darkmode-js.min.js"></script>
     <script src="https://cdn.plot.ly/plotly-latest.min.js" charset="utf-8"></script>
     <script src="https://unpkg.com/pcm-player"></script>
-    <script src="js/worker.js"></script>
 </head>
 <style>
 body {
@@ -83,9 +82,6 @@ input[type="range"] {
             <div id="graph"></div>
         </div>
         <div id="controls">
-            <select id="topicSelect" class="button" onchange="connect()">
-                <option value="">Select a topic</option>
-            </select>
             <input type="range" max="1" value="0.5" min="0" id="range" onchange="changeVolume(event)" step="0.1">
             <div id="playbackControls">
                 <button id="pauseBtn" class="button" onclick="pause()">Pause</button>
@@ -96,15 +92,15 @@ input[type="range"] {
     <script>
     let player;
     let ws;
-    let port;
-    const DEFAULT_WS_PORT =  8888;
+    const DEFAULT_WS_PORT = 8888;
 
     function addDarkmodeWidget() {
         new Darkmode().showWidget();
     }
+
     window.addEventListener('load', () => {
-        fetchTopics(); // Fetch available topics on load
         addDarkmodeWidget(); // Add your dark mode widget after connecting
+        connect(); // Automatically connect to the WebSocket server
     });
 
     var pauseBtn = document.getElementById("pauseBtn");
@@ -153,35 +149,7 @@ input[type="range"] {
         line: { color: '#DF56F1' }
     }], layout);
 
-    async function fetchTopics() {
-        const response = await fetch('/get-topics');
-        const topics = await response.json();
-        const topicSelect = document.getElementById("topicSelect");
-
-        topics.forEach(topic => {
-            const option = document.createElement("option");
-            option.value = topic;
-            option.textContent = topic;
-            topicSelect.appendChild(option);
-        });
-    }
-    function initializeTopicWebSocket() {
-        console.log(port);
-        ws = new WebSocket(`ws://localhost:${port}`);
-        ws.binaryType = 'arraybuffer';
-        ws.onopen = () => {
-            console.log(`Connected to topic WebSocket server on port ${port}`);
-        };
-        ws.onmessage = (event) => {
-            player.feed(event.data);
-        };
-    }
-    window.connect = function connect() {
-        const topicSelect = document.getElementById("topicSelect");
-        const topic = topicSelect.value;
-
-        if (!topic) return;
-
+    function connect() {
         pauseBtn.disabled = false;
 
         player = new PCMPlayer({
@@ -195,39 +163,22 @@ input[type="range"] {
             ws.close();
         }
 
-        // Connect to the default WebSocket server to get the port for the topic
-        const defaultWS = new WebSocket(`ws://localhost:${DEFAULT_WS_PORT}`);
-        defaultWS.onopen = () => {
-            defaultWS.send(JSON.stringify({ topic }));
+        ws = new WebSocket(`ws://${window.location.hostname}:${DEFAULT_WS_PORT}`);
+        ws.binaryType = 'arraybuffer';
+        ws.onopen = () => {
+            console.log("Connected to WebSocket server");
         };
-        defaultWS.onmessage = (event) => {
-            const port  = event.data;
-            console.log(port);
-            if (port) {
-                defaultWS.close();
-                console.log(port);
-                ws = new WebSocket(`ws://localhost:${port}`);
-                ws.binaryType = 'arraybuffer';
-                ws.onopen = () => {
-                    console.log(`Connected to topic WebSocket server on port ${port}`);
-                };
-                ws.onmessage = (event) => {
-                    console.log(event.data);
-                    const arrayBuffer = event.data;
-                    const audioData = new Int16Array(arrayBuffer);
-                    console.log(audioData)
-                    player.feed(audioData);
-                };
-            }
+        ws.onmessage = (event) => {
+            const audioData = new Int16Array(event.data);
+            player.feed(audioData);
         };
-        defaultWS.onerror = (error) => {
-            console.error("Error with default WebSocket:", error);
+        ws.onerror = (error) => {
+            console.error("Error with WebSocket:", error);
         };
-
-        defaultWS.onclose = () => {
-            console.log("Disconnected from default WebSocket server");
+        ws.onclose = () => {
+            console.log("Disconnected from WebSocket server");
         };
-    };
+    }
 
     window.changeVolume = function changeVolume(e) {
         player.volume(document.querySelector('#range').value);
