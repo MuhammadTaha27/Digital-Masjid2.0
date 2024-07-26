@@ -2,16 +2,16 @@ const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const WebSocket = require("ws");
-const wav = require('wav');
+const http = require("http");
+
 const app = express();
-const stream = require('stream');
+const PORT = process.env.PORT || 8000;
 
-const WS_PORT = process.env.WS_PORT || 8888;
-const HTTP_PORT = process.env.HTTP_PORT || 8000;
+// HTTP server
+const server = http.createServer(app);
 
-const wsServer = new WebSocket.Server({ port: WS_PORT }, () =>
-  console.log(`WS server is listening at ws://localhost:${WS_PORT}`)
-);
+// WebSocket server
+const wsServer = new WebSocket.Server({ server });
 
 // array of connected websocket clients
 let connectedClients = [];
@@ -22,9 +22,9 @@ wsServer.on("connection", (ws, req) => {
   connectedClients.push(ws);
   ws.on("message", (data) => {
     audioStream.push(data);
-    connectedClients.forEach((ws, i) => {
-      if (ws.readyState === ws.OPEN) {
-        ws.send(data);
+    connectedClients.forEach((client, i) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(data);
       } else {
         connectedClients.splice(i, 1);
       }
@@ -42,8 +42,6 @@ app.get("/audio", (req, res) =>
   res.sendFile(path.resolve(__dirname, "./audio_client.html"))
 );
 
-
-app.listen(HTTP_PORT, () =>
-  console.log(`HTTP server listening at http://localhost:${HTTP_PORT}`)
-);
-
+server.listen(PORT, () => {
+  console.log(`Server listening on http://localhost:${PORT}`);
+});
